@@ -1,0 +1,11 @@
+node_modules
+dist
+.output
+.tanstack
+.vinxi
+src/routeTree.gen.ts
+.data/
+.DS_Store
+# local design tooling and the product brief (a link to a file outside this repo)
+.impeccable/
+PRODUCT.md

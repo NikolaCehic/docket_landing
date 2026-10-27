@@ -1,0 +1,188 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Docket plates</title>
+<!-- The engraved data plates that sit behind the product screenshots. Each one is drawn from the data its screen is
+     about, in the Radiant Core's own vocabulary: single-weight zinc lines on paper, one emerald line.
+     Open in a browser to preview; scripts/render-plates (headless) exports them to public/plates/*.webp. -->
+<style>body{margin:0;background:#d4d4d8;display:grid;gap:24px;padding:24px}canvas{width:100%;max-width:1032px;height:auto;border-radius:20px;display:block}</style>
+<body>
+<script>
+const PAPER = '#F4F4F5', EM = '#059669'
+const ink = (a) => `rgba(63,63,70,${a})`
+function rng(seed) { let s = seed >>> 0; return () => { s = (s + 0x6D2B79F5) >>> 0; let t = s; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296 } }
+function noise2(seed) {
+  const r = rng(seed), P = new Float32Array(512); for (let i = 0; i < 512; i++) P[i] = r()
+  const h = (x, y) => P[((x * 73856093) ^ (y * 19349663)) & 511]
+  const sm = (t) => t * t * (3 - 2 * t)
+  return (x, y) => { const xi = Math.floor(x), yi = Math.floor(y), xf = x - xi, yf = y - yi
+    const a = h(xi, yi), b = h(xi + 1, yi), c = h(xi, yi + 1), d = h(xi + 1, yi + 1), u = sm(xf), v = sm(yf)
+    return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v }
+}
+const sq = (v) => v * v
+const fbm = (n, x, y, o = 5) => { let s = 0, a = 0.5, f = 1; for (let i = 0; i < o; i++) { s += a * n(x * f, y * f); f *= 2.03; a *= 0.5 } return s }
+function paper(c) {
+  const g = c.getContext('2d'), W = c.width, H = c.height
+  g.fillStyle = PAPER; g.fillRect(0, 0, W, H)
+  const rg = g.createRadialGradient(W * 0.5, H * 0.35, 0, W * 0.5, H * 0.35, W * 0.8)
+  rg.addColorStop(0, 'rgba(255,255,255,.55)'); rg.addColorStop(1, 'rgba(255,255,255,0)')
+  g.fillStyle = rg; g.fillRect(0, 0, W, H)
+  g.lineJoin = 'round'; g.lineCap = 'round'
+  return g
+}
+function poly(g, pts) { g.beginPath(); pts.forEach(([x, y], i) => (i ? g.lineTo(x, y) : g.moveTo(x, y))) }
+
+// ------------------------------------------------------------- Home: a year of sales, one ridge per week (hourly orders)
+function sales(c) {
+  const g = paper(c), W = c.width, H = c.height, n = noise2(7), r = rng(9), N = 52
+  const season = (w) => 0.5 + 0.12 * Math.sin((w / 52) * Math.PI * 2 - 1.4) + 0.5 * Math.exp(-sq((w - 28) / 0.9)) + 0.85 * Math.exp(-sq((w - 47) / 1.1)) + 0.35 * Math.exp(-sq((w - 50) / 1.6))
+  const dayLvl = Array.from({ length: N }, () => Array.from({ length: 7 }, () => 0.35 + 0.65 * r()))
+  for (let i = 0; i < N; i++) {
+    const y0 = H * 0.035 + (H * 1.0) * (i / N), amp = H * 0.13 * season(i) * (0.8 + 0.4 * (i / N))
+    const pts = []
+    for (let x = -10; x <= W + 10; x += 2) {
+      const h = (x / W) * 7 * 24, day = Math.max(0, Math.min(6, Math.floor(h / 24))), ph = (h % 24) / 24
+      // orders through the day: a lunch shoulder and an evening peak, never the same twice
+      const shape = 0.45 * Math.exp(-sq((ph - 0.52) / 0.09)) + Math.exp(-sq((ph - 0.84) / (0.07 + 0.03 * dayLvl[i][day]))) + 0.08
+      const jitter = 0.75 + 0.5 * fbm(n, x * 0.035 + i * 13.1, i * 0.7, 3)
+      const edge = Math.min(1, Math.min(x + 10, W + 10 - x) / (W * 0.04))
+      pts.push([x, y0 - amp * shape * dayLvl[i][day] * jitter * edge])
+    }
+    const em = i === 40
+    poly(g, pts); g.lineTo(W + 10, H + 10); g.lineTo(-10, H + 10); g.closePath(); g.fillStyle = PAPER; g.fill()
+    poly(g, pts); g.strokeStyle = em ? EM : ink(0.3 + 0.3 * (i / N)); g.lineWidth = em ? 2.6 : 1.2 + 0.35 * (i / N); g.stroke()
+  }
+}
+
+// ------------------------------------------------------------- Ads / Command: the spend landscape, one profile per row
+function terrain(c, o) {
+  const g = paper(c), W = c.width, H = c.height, n = noise2(o.seed)
+  const hgt = (x, z) => {
+    let v = fbm(n, x * 0.55 + 3, z * 0.55 + 7, 6) - 0.45
+    v += o.ridge * Math.exp(-sq(x - o.rx) * 0.35) * (0.6 + 0.4 * fbm(n, z * 0.8, 2, 3))
+    v -= o.valley * Math.exp(-sq(x - o.vx - Math.sin(z * 0.6) * 0.6) * 1.2)
+    return v
+  }
+  const horizon = H * o.horizon, f = W * 0.62, camH = 1.25, rows = o.rows
+  for (let k = 0; k < rows; k++) {
+    const z = o.zFar - (o.zFar - o.zNear) * Math.pow(k / (rows - 1), 0.7)
+    const pts = []
+    for (let sx = -10; sx <= W + 10; sx += 3) {
+      const x = ((sx - W / 2) / f) * z
+      pts.push([sx, horizon + ((camH - hgt(x, z) * o.scale) / z) * f * 0.55])
+    }
+    const near = k / rows
+    poly(g, pts); g.lineTo(W + 10, H + 10); g.lineTo(-10, H + 10); g.closePath(); g.fillStyle = PAPER; g.fill()
+    const em = k === o.em
+    poly(g, pts); g.strokeStyle = em ? EM : ink(0.18 + 0.55 * near); g.lineWidth = em ? 2.6 : 1 + 1.2 * near; g.stroke()
+  }
+}
+
+// ------------------------------------------------------------- Automations: 90 mornings of replay, engraved bars
+function bars(c) {
+  const g = paper(c), W = c.width, H = c.height
+  const N = 90, gap = W / N, base = H * 1.0
+  const thr = H * 0.5
+  for (let i = 0; i < N; i++) {
+    const v = (Math.sin(i * 1.7) + Math.sin(i * 0.43) * 0.8 + 2) / 4
+    const h = H * (0.18 + 0.8 * Math.pow(v, 1.15)), x0 = i * gap + gap * 0.18, x1 = (i + 1) * gap - gap * 0.18
+    const top = base - h
+    g.strokeStyle = ink(v > 0.5 ? 0.62 : 0.32); g.lineWidth = 1.3
+    for (let y = base; y > top; y -= 7) { g.beginPath(); g.moveTo(x0, y); g.lineTo(x1, y); g.stroke() }
+    g.beginPath(); g.moveTo(x0, top); g.lineTo(x1, top); g.lineWidth = 2; g.strokeStyle = ink(0.75); g.stroke()
+  }
+  g.beginPath(); g.moveTo(0, thr); g.lineTo(W, thr); g.strokeStyle = EM; g.lineWidth = 2.6; g.setLineDash([18, 10]); g.stroke(); g.setLineDash([])
+}
+
+// ------------------------------------------------------------- Runs: 142 outcomes around the median, a dial
+function dial(c) {
+  const g = paper(c), W = c.width, H = c.height, r = rng(11)
+  const cx = W * 0.5, cy = H * 1.62, R = H * 1.5
+  const a0 = -Math.PI / 2 - 0.75, a1 = -Math.PI / 2 + 0.75
+  for (let k = 0; k < 14; k++) {
+    const rr = R - 120 + k * 18
+    g.beginPath(); g.arc(cx, cy, rr, a0, a1); g.strokeStyle = ink(0.12 + 0.02 * k); g.lineWidth = 1.1; g.stroke()
+  }
+  for (let i = 0; i < 142; i++) {
+    const a = a0 + (a1 - a0) * (i + 0.5) / 142
+    const ok = r() < 115 / 142, d = (r() - 0.45) * (ok ? 90 : 230)
+    const r0 = R + 40, r1 = R + 40 + 60 + d
+    g.beginPath(); g.moveTo(cx + Math.cos(a) * r0, cy + Math.sin(a) * r0); g.lineTo(cx + Math.cos(a) * r1, cy + Math.sin(a) * r1)
+    g.strokeStyle = ink(ok ? 0.6 : 0.3); g.lineWidth = ok ? 2 : 1.3; g.stroke()
+  }
+  for (let k = 0; k < 3; k++) { g.beginPath(); g.arc(cx, cy, R + 250 + k * 34, a0, a1); g.strokeStyle = ink(0.16); g.lineWidth = 1.1; g.setLineDash([2, 14]); g.stroke() }
+  g.setLineDash([])
+  g.beginPath(); g.arc(cx, cy, R + 100, a0, a1); g.strokeStyle = EM; g.lineWidth = 2.6; g.stroke()
+}
+
+// ------------------------------------------------------------- Marketplace: 17 verticals as orbits, 57 agents on them
+// o.dark draws the night print (the verticals bento tile): zinc and emerald light on the night, like the hero
+function orbits(c, o = {}) {
+  const W = c.width, H = c.height, r = rng(5), dark = !!o.dark
+  let g
+  if (dark) {
+    g = c.getContext('2d'); g.fillStyle = '#09090B'; g.fillRect(0, 0, W, H)
+    const rg = g.createRadialGradient(W * (o.cx ?? 0.5), H * (o.cy ?? 0.52), 0, W * (o.cx ?? 0.5), H * (o.cy ?? 0.52), Math.max(W, H) * 0.7)
+    rg.addColorStop(0, 'rgba(6,78,59,.38)'); rg.addColorStop(1, 'rgba(6,78,59,0)')
+    g.fillStyle = rg; g.fillRect(0, 0, W, H); g.lineJoin = 'round'; g.lineCap = 'round'
+  } else g = paper(c)
+  const line = (a) => (dark ? `rgba(212,212,216,${a * 0.75})` : ink(a))
+  const cx = W * (o.cx ?? 0.5), cy = H * (o.cy ?? 0.52), R = (o.R ?? 0.72) * W
+  const pats = [[], [46, 6, 14, 6], [90, 10, 30, 10], [140, 18, 40, 18], [4, 12]]
+  const rings = []
+  for (let i = 0; i < 17; i++) {
+    const tilt = (i / 17) * Math.PI + r() * 0.1, inc = 0.12 + r() * 0.5, rr = R * (0.62 + r() * 0.45)
+    rings.push({ tilt, inc, rr })
+  }
+  rings.forEach((q, i) => {
+    g.save(); g.translate(cx, cy); g.rotate(q.tilt); g.scale(1, q.inc)
+    g.beginPath(); g.arc(0, 0, q.rr, 0, Math.PI * 2); g.restore()
+    const em = i === 9
+    g.setLineDash(em ? [] : pats[i % pats.length]); g.strokeStyle = em ? (dark ? '#34D399' : EM) : line(0.3 + 0.35 * r()); g.lineWidth = em ? 2.6 : 1.4; g.stroke()
+  })
+  g.setLineDash([])
+  for (let k = 0; k < 57; k++) {
+    const q = rings[Math.floor(r() * 17)], t = r() * Math.PI * 2
+    const x = Math.cos(t) * q.rr, y = Math.sin(t) * q.rr * q.inc
+    const px = cx + x * Math.cos(q.tilt) - y * Math.sin(q.tilt), py = cy + x * Math.sin(q.tilt) + y * Math.cos(q.tilt)
+    g.beginPath(); g.arc(px, py, 4.2, 0, Math.PI * 2); g.fillStyle = dark ? '#09090B' : PAPER; g.fill()
+    g.strokeStyle = dark ? (k % 4 === 0 ? '#34D399' : 'rgba(228,228,231,.75)') : ink(0.7); g.lineWidth = 1.6; g.stroke()
+  }
+}
+
+// ------------------------------------------------------------- Phone: the spoken change as a ribbon of rules
+function voice(c) {
+  const g = paper(c), W = c.width, H = c.height, n = noise2(3), N = 44
+  // syllable envelope of "Increase TOS on all campaigns containing CBO"
+  const syl = [0.6, 0.9, 0.5, 0.95, 0.85, 0.4, 0.6, 0.75, 0.9, 0.55, 0.8, 0.7, 0.45, 0.9, 1, 0.8]
+  const env = (u) => { const s = u * syl.length - 0.5, i = Math.max(0, Math.min(syl.length - 1, Math.round(s))), f = s - Math.round(s)
+    const win = Math.min(1, Math.min(u, 1 - u) * 7); return (0.12 + syl[i] * Math.pow(Math.cos(f * Math.PI), 2) * 0.88) * win }
+  const smooth = (u) => { let s = 0, k = 0; for (let d = -6; d <= 6; d++) { const w = Math.exp(-(d * d) / 10); s += env(u + d * 0.004) * w; k += w } return s / k }
+  const cy = H * 0.5
+  for (let j = 0; j < N; j++) {
+    const t = j / (N - 1) - 0.5, pts = []
+    for (let x = -10; x <= W + 10; x += 3) {
+      const u = x / W, e = smooth(u)
+      const y = cy + t * H * 0.92 * (0.22 + e) + Math.sin(u * 34 + j * 0.35) * 18 * e + (n(u * 9, j * 0.3) - 0.5) * 22 * e
+      pts.push([x, y])
+    }
+    const em = j === Math.floor(N / 2)
+    poly(g, pts); g.strokeStyle = em ? EM : ink(0.3 + 0.45 * (1 - Math.abs(t) * 2) ** 1.5); g.lineWidth = em ? 3 : 1.6; g.stroke()
+  }
+}
+
+const LIST = [
+  ['command', 2064, 1456, (c) => terrain(c, { seed: 21, ridge: 0.55, rx: -1.5, valley: 0.45, vx: 0.3, horizon: 0.0, rows: 100, zNear: 0.75, zFar: 9, scale: 2.0, em: 60 })],
+  ['home', 2064, 1456, sales],
+  ['ads', 2064, 1456, (c) => terrain(c, { seed: 4, ridge: 0.75, rx: 1.2, valley: 0.3, vx: -0.6, horizon: 0.0, rows: 100, zNear: 0.9, zFar: 10, scale: 2.5, em: 62 })],
+  ['automations', 2064, 1456, bars],
+  ['runs', 2064, 1456, dial],
+  ['marketplace', 2064, 1456, orbits],
+  ['phones', 2064, 1600, voice],
+  ['verticals', 1120, 1480, (c) => orbits(c, { dark: true, cx: 0.66, cy: 0.74, R: 0.95 })],
+]
+window.PLATES = {}
+for (const [name, w, h, draw] of LIST) {
+  const c = document.createElement('canvas'); c.width = w; c.height = h; c.title = name
+  draw(c); document.body.appendChild(c); window.PLATES[name] = c
+}
+</script>
